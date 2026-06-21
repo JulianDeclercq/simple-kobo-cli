@@ -19,7 +19,7 @@ local VALID_EXTENSIONS = {
   ".kepub.epub", ".epub", ".kepub", ".pdf", ".cbz", ".txt", ".mobi"
 }
 
-local CHUNK = 8192
+local CHUNK = 1024 * 1024
 
 -- ---------------------------------------------------------------------------
 -- Utility functions
@@ -256,18 +256,72 @@ end
 -- Command: add
 -- ---------------------------------------------------------------------------
 
+-- add_one: copy a single source file into the author dir. Returns true or (nil, err).
+local function add_one(dest_dir, author, src_path)
+  local bname = basename(src_path)
+
+  local dest_path = path_join(dest_dir, bname)
+
+  local ok, cerr = copy_file(src_path, dest_path)
+  if not ok then return nil, "Copy failed: " .. (cerr or "unknown error") end
+
+  local src_size = file_size(src_path)
+  local dst_size = file_size(dest_path)
+  if src_size ~= dst_size then
+    os.remove(dest_path)
+    return nil, "Copy size mismatch (src=" .. tostring(src_size) ..
+        " dst=" .. tostring(dst_size) .. "). Partial file removed."
+  end
+
+  print("Added: " .. author .. "/" .. bname)
+  return true
+end
+
 local function cmd_add(kobo_root)
   local author, src_path, err = parse_args(arg, true, "file path")
   if err then die(err) end
 
   src_path = normalize_path(src_path)
 
+  if is_system_dir(author) then
+    die("Refusing to operate in system directory: " .. author)
+  end
+
+  local dest_dir = path_join(kobo_root, author)
+
+  -- Directory source: bulk-add every valid-ext file inside (non-recursive).
+  if is_dir(src_path) then
+    local files = {}
+    for _, child in ipairs(list_entries(src_path, "files")) do
+      if has_valid_ext(child) then files[#files + 1] = child end
+    end
+    if #files == 0 then
+      die("No supported books found in directory: " .. src_path ..
+          "\nSupported: " .. table.concat(VALID_EXTENSIONS, ", "))
+    end
+
+    if not is_dir(dest_dir) then
+      local ok, mkerr = mkdir_safe(dest_dir)
+      if not ok then die("Failed to create author directory: " .. (mkerr or dest_dir)) end
+    end
+
+    local added, failed = 0, 0
+    for _, child in ipairs(files) do
+      local ok, aerr = add_one(dest_dir, author, path_join(src_path, child))
+      if ok then added = added + 1
+      else failed = failed + 1; io.stderr:write("Error: " .. (aerr or child) .. "\n") end
+    end
+    print(string.format("Done: %d added, %d failed.", added, failed))
+    if failed > 0 then os.exit(1) end
+    return
+  end
+
+  -- Single-file source.
   if not file_exists(src_path) then
     die("Source file not found: " .. src_path)
   end
 
-  local bname = basename(src_path)
-  local valid, ext = has_valid_ext(bname)
+  local valid, ext = has_valid_ext(basename(src_path))
   if not valid then
     die(
       "Unsupported file format: " .. ext ..
@@ -275,30 +329,13 @@ local function cmd_add(kobo_root)
     )
   end
 
-  if is_system_dir(author) then
-    die("Refusing to operate in system directory: " .. author)
-  end
-
-  local dest_dir  = path_join(kobo_root, author)
-  local dest_path = path_join(dest_dir, bname)
-
   if not is_dir(dest_dir) then
     local ok, mkerr = mkdir_safe(dest_dir)
     if not ok then die("Failed to create author directory: " .. (mkerr or dest_dir)) end
   end
 
-  local ok, cerr = copy_file(src_path, dest_path)
-  if not ok then die("Copy failed: " .. (cerr or "unknown error")) end
-
-  local src_size = file_size(src_path)
-  local dst_size = file_size(dest_path)
-  if src_size ~= dst_size then
-    os.remove(dest_path)
-    die("Copy size mismatch (src=" .. tostring(src_size) ..
-        " dst=" .. tostring(dst_size) .. "). Partial file removed.")
-  end
-
-  print("Added: " .. author .. "/" .. bname)
+  local ok, aerr = add_one(dest_dir, author, src_path)
+  if not ok then die(aerr) end
 end
 
 -- ---------------------------------------------------------------------------
@@ -380,12 +417,13 @@ end
 local function usage()
   io.stderr:write(table.concat({
     "Usage:",
-    "  lua kobo.lua add --author \"Last, First\" <path-to-book>",
+    "  lua kobo.lua add --author \"Last, First\" <path-to-book-or-dir>",
     "  lua kobo.lua list",
     "  lua kobo.lua rm  --author \"Last, First\" <basename>",
     "",
     "Examples:",
     "  lua kobo.lua add --author \"Adams, Douglas\" \"C:/downloads/Hitchhiker.kepub.epub\"",
+    "  lua kobo.lua add --author \"Adams, Douglas\" \"C:/downloads/adams/\"",
     "  lua kobo.lua list",
     "  lua kobo.lua rm  --author \"Adams, Douglas\" \"Hitchhiker.kepub.epub\"",
     "",
