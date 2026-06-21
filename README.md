@@ -39,10 +39,13 @@ A line is printed to stderr showing which config file was loaded.
 ## Usage
 
 ```
-lua kobo.lua add --author "Last, First" <path-to-book>
+lua kobo.lua add --author "Last, First" <path-to-book-or-dir>
 lua kobo.lua list
 lua kobo.lua rm  --author "Last, First" <basename>
 ```
+
+`add` accepts a single file or a directory. Given a directory, it copies every
+supported book inside it (non-recursive) into the author dir.
 
 ### Examples
 
@@ -50,6 +53,12 @@ lua kobo.lua rm  --author "Last, First" <basename>
 # Copy a book to the Kobo
 lua kobo.lua add --author "Adams, Douglas" "C:\Downloads\Hitchhiker.kepub.epub"
 # Added: Adams, Douglas/Hitchhiker.kepub.epub
+
+# Copy every supported book in a directory at once (non-recursive)
+lua kobo.lua add --author "Adams, Douglas" "C:\Downloads\adams\"
+# Added: Adams, Douglas/Hitchhiker.kepub.epub
+# Added: Adams, Douglas/Restaurant.kepub.epub
+# Done: 2 added, 0 failed.
 
 # List all books on the Kobo
 lua kobo.lua list
@@ -74,6 +83,7 @@ The `--author` flag may appear before or after the positional argument.
 - System directories (`.kobo`, `.kobo-images`, `.adobe-digital-editions`, `.add`,
   `System Volume Information`) are never touched.
 - `add` validates source exists, extension is supported, and verifies copy size matches
-  source before reporting success.
+  source before reporting success. Directory adds are non-recursive and skip
+  unsupported files; the command exits non-zero if any file fails.
 - Windows-only. Directory listing uses `dir /b`; filenames with non-ASCII characters
   may be affected by the active console codepage. ASCII filenames work without issue.
